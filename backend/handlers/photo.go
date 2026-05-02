@@ -249,11 +249,11 @@ func (h *PhotoHandler) GetPhotoGuesses(c *gin.Context) {
 	defer rows.Close()
 
 	type GuessItem struct {
-		ID        string    `json:"id"`
-		Longitude float64   `json:"longitude"`
-		Latitude  float64   `json:"latitude"`
-		DistanceKm float64  `json:"distance_km"`
-		CreatedAt time.Time `json:"created_at"`
+		ID         string    `json:"id"`
+		Longitude  float64   `json:"longitude"`
+		Latitude   float64   `json:"latitude"`
+		DistanceKm float64   `json:"distance_km"`
+		CreatedAt  time.Time `json:"created_at"`
 	}
 
 	var guesses []GuessItem

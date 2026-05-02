@@ -73,12 +73,12 @@ type CreateGameRequest struct {
 }
 
 type GameResponse struct {
-	ID           string     `json:"id"`
-	PlayerName   string     `json:"player_name"`
-	Mode         int        `json:"mode"`
-	TotalScore   int        `json:"total_score"`
-	RoundsPlayed int        `json:"rounds_played"`
-	Completed    bool       `json:"completed"`
+	ID           string               `json:"id"`
+	PlayerName   string               `json:"player_name"`
+	Mode         int                  `json:"mode"`
+	TotalScore   int                  `json:"total_score"`
+	RoundsPlayed int                  `json:"rounds_played"`
+	Completed    bool                 `json:"completed"`
 	CurrentPhoto *RandomPhotoResponse `json:"current_photo,omitempty"`
 }
 
@@ -155,14 +155,14 @@ type CreateReportRequest struct {
 }
 
 type ReportListItem struct {
-	ID                 string     `json:"id"`
-	PhotoID            string     `json:"photo_id"`
-	PhotoURL           string     `json:"photo_url"`
-	CurrentLongitude   float64    `json:"current_longitude"`
-	CurrentLatitude    float64    `json:"current_latitude"`
-	SuggestedLongitude float64    `json:"suggested_longitude"`
-	SuggestedLatitude  float64    `json:"suggested_latitude"`
-	Comment            *string    `json:"comment,omitempty"`
-	Status             string     `json:"status"`
-	CreatedAt          time.Time  `json:"created_at"`
+	ID                 string    `json:"id"`
+	PhotoID            string    `json:"photo_id"`
+	PhotoURL           string    `json:"photo_url"`
+	CurrentLongitude   float64   `json:"current_longitude"`
+	CurrentLatitude    float64   `json:"current_latitude"`
+	SuggestedLongitude float64   `json:"suggested_longitude"`
+	SuggestedLatitude  float64   `json:"suggested_latitude"`
+	Comment            *string   `json:"comment,omitempty"`
+	Status             string    `json:"status"`
+	CreatedAt          time.Time `json:"created_at"`
 }
