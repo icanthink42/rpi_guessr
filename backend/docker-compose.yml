@@ -35,7 +35,8 @@ services:
       retries: 5
 
   minio:
-    image: minio/minio
+    image: bitnamilegacy/minio@sha256:451fe6858cb770cc9d0e77ba811ce287420f781c7c1b806a386f6896471a349c
+    user: "0"
     ports:
       - "9000:9000"
       - "9001:9001"
@@ -46,13 +47,13 @@ services:
       - minio_data:/data
     command: server /data --console-address ":9001"
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:9000/minio/health/live"]
       interval: 5s
       timeout: 5s
       retries: 5
 
   minio-setup:
-    image: minio/mc
+    image: bitnamilegacy/minio@sha256:451fe6858cb770cc9d0e77ba811ce287420f781c7c1b806a386f6896471a349c
     depends_on:
       minio:
         condition: service_healthy
