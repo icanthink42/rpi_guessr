@@ -13,6 +13,7 @@ type Config struct {
 	Port             string
 	GoogleClientID   string
 	AllowedDomain    string
+	AllowedEmails    string
 }
 
 func Load() *Config {
@@ -28,6 +29,7 @@ func Load() *Config {
 		Port:             getEnv("PORT", "8080"),
 		GoogleClientID:   getEnv("GOOGLE_CLIENT_ID", ""),
 		AllowedDomain:    getEnv("ALLOWED_DOMAIN", ""),
+		AllowedEmails:    loadAllowedEmails(),
 	}
 }
 

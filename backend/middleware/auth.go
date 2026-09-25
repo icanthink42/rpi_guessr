@@ -12,6 +12,7 @@ import (
 type AuthMiddleware struct {
 	clientID      string
 	allowedDomain string
+	allowedEmails map[string]struct{}
 }
 
 type TokenInfo struct {
@@ -21,11 +22,30 @@ type TokenInfo struct {
 	Exp           string `json:"exp"`
 }
 
-func NewAuthMiddleware(clientID, allowedDomain string) *AuthMiddleware {
-	return &AuthMiddleware{
+func NewAuthMiddleware(clientID, allowedDomain, allowedEmails string) *AuthMiddleware {
+	auth := &AuthMiddleware{
 		clientID:      clientID,
-		allowedDomain: allowedDomain,
+		allowedDomain: strings.ToLower(strings.TrimSpace(allowedDomain)),
+		allowedEmails: make(map[string]struct{}),
 	}
+	for _, email := range strings.Split(allowedEmails, ",") {
+		email = strings.ToLower(strings.TrimSpace(email))
+		if email != "" {
+			auth.allowedEmails[email] = struct{}{}
+		}
+	}
+	return auth
+}
+
+func (a *AuthMiddleware) isAuthorizedEmail(email string) bool {
+	email = strings.ToLower(strings.TrimSpace(email))
+	if _, ok := a.allowedEmails[email]; ok {
+		return true
+	}
+	if a.allowedDomain != "" {
+		return strings.HasSuffix(email, "@"+a.allowedDomain)
+	}
+	return len(a.allowedEmails) == 0
 }
 
 func (a *AuthMiddleware) RequireAuth() gin.HandlerFunc {
@@ -73,13 +93,11 @@ func (a *AuthMiddleware) RequireAuth() gin.HandlerFunc {
 			return
 		}
 
-		// Check domain if configured
-		if a.allowedDomain != "" {
-			if !strings.HasSuffix(tokenInfo.Email, "@"+a.allowedDomain) {
-				c.JSON(http.StatusForbidden, gin.H{"error": "unauthorized domain"})
-				c.Abort()
-				return
-			}
+		// Allow members of the configured domain or explicitly listed email addresses.
+		if !a.isAuthorizedEmail(tokenInfo.Email) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "unauthorized email"})
+			c.Abort()
+			return
 		}
 
 		c.Set("email", tokenInfo.Email)

@@ -29,7 +29,7 @@ func main() {
 
 	photoHandler := handlers.NewPhotoHandler(db, s3Storage)
 	gameHandler := handlers.NewGameHandler(db, s3Storage)
-	authMiddleware := middleware.NewAuthMiddleware(cfg.GoogleClientID, cfg.AllowedDomain)
+	authMiddleware := middleware.NewAuthMiddleware(cfg.GoogleClientID, cfg.AllowedDomain, cfg.AllowedEmails)
 
 	r := gin.Default()
 
