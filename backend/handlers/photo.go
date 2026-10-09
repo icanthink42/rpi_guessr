@@ -3,10 +3,13 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"math"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"rpi_guessr/backend/database"
@@ -48,6 +51,29 @@ func CalculatePoints(distanceKm float64) int {
 		return 0
 	}
 	return result
+}
+
+// parseManualLocation parses an optional latitude/longitude pair submitted with
+// an upload. ok is false when neither value is provided.
+func parseManualLocation(latStr, lonStr string) (lat, lon float64, ok bool, err error) {
+	latStr = strings.TrimSpace(latStr)
+	lonStr = strings.TrimSpace(lonStr)
+	if latStr == "" && lonStr == "" {
+		return 0, 0, false, nil
+	}
+	if latStr == "" || lonStr == "" {
+		return 0, 0, false, errors.New("latitude and longitude must both be provided")
+	}
+
+	lat, latErr := strconv.ParseFloat(latStr, 64)
+	lon, lonErr := strconv.ParseFloat(lonStr, 64)
+	if latErr != nil || lonErr != nil ||
+		math.IsNaN(lat) || math.IsNaN(lon) ||
+		lat < -90 || lat > 90 || lon < -180 || lon > 180 {
+		return 0, 0, false, errors.New("invalid latitude or longitude")
+	}
+
+	return lat, lon, true, nil
 }
 
 type PhotoHandler struct {
@@ -93,15 +119,26 @@ func (h *PhotoHandler) UploadPhoto(c *gin.Context) {
 	}
 	fileBytes := buf.Bytes()
 
-	exifData, err := exif.Decode(bytes.NewReader(fileBytes))
+	// A location chosen by the admin on the map takes precedence over EXIF data,
+	// so photos without GPS metadata can still be uploaded.
+	lat, lon, hasLocation, err := parseManualLocation(c.PostForm("latitude"), c.PostForm("longitude"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read photo metadata"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	lat, lon, err := exifData.LatLong()
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "photo does not contain GPS location data"})
+	if !hasLocation {
+		if exifData, err := exif.Decode(bytes.NewReader(fileBytes)); err == nil {
+			lat, lon, err = exifData.LatLong()
+			hasLocation = err == nil
+		}
+	}
+
+	if !hasLocation {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "photo does not contain GPS location data",
+			"code":  "missing_location",
+		})
 		return
 	}
 

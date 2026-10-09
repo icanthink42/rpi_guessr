@@ -24,6 +24,25 @@ const guessIcon = new L.Icon({
   iconAnchor: [12, 36],
 })
 
+const RPI_CENTER: [number, number] = [42.7302, -73.6788]
+
+interface LatLng {
+  lat: number
+  lng: number
+}
+
+// Places a marker wherever the map is clicked
+function LocationPicker({ location, onPick }: { location: LatLng | null; onPick: (location: LatLng) => void }) {
+  useMapEvents({
+    click(e) {
+      onPick({ lat: e.latlng.lat, lng: e.latlng.lng })
+    },
+  })
+  return location ? (
+    <Marker position={[location.lat, location.lng]} icon={markerIcon} />
+  ) : null
+}
+
 interface Photo {
   id: string
   photo_url: string
@@ -68,6 +87,12 @@ interface UploadProgress {
   failed: string[]
 }
 
+// A selected photo with no GPS data, waiting for a location to be placed on the map
+interface PendingPhoto {
+  file: File
+  previewUrl: string
+}
+
 interface AdminPageProps {
   onBack: () => void
 }
@@ -85,6 +110,11 @@ export default function AdminPage({ onBack }: AdminPageProps) {
   const [photoGuesses, setPhotoGuesses] = useState<Guess[]>([])
   const [saving, setSaving] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Photos without GPS data, placed on the map one at a time
+  const [locationQueue, setLocationQueue] = useState<PendingPhoto[]>([])
+  const [queueLocation, setQueueLocation] = useState<LatLng | null>(null)
+  const [uploadingQueued, setUploadingQueued] = useState(false)
 
   // Reports state
   const [reports, setReports] = useState<LocationReport[]>([])
@@ -339,6 +369,22 @@ export default function AdminPage({ onBack }: AdminPageProps) {
     }
   }
 
+  // Uploads a photo, using its GPS metadata unless a location is given
+  const uploadPhoto = (file: File, location?: LatLng) => {
+    const formData = new FormData()
+    formData.append('photo', file)
+    if (location) {
+      formData.append('latitude', String(location.lat))
+      formData.append('longitude', String(location.lng))
+    }
+
+    return fetch(`${API_BASE}/api/photos`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: formData,
+    })
+  }
+
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
     if (!files || files.length === 0) return
@@ -348,20 +394,14 @@ export default function AdminPage({ onBack }: AdminPageProps) {
 
     let succeeded = 0
     const failed: string[] = []
+    const missingLocation: PendingPhoto[] = []
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i]
       setProgress(prev => prev ? { ...prev, current: i + 1 } : null)
 
       try {
-        const formData = new FormData()
-        formData.append('photo', file)
-
-        const response = await fetch(`${API_BASE}/api/photos`, {
-          method: 'POST',
-          headers: getAuthHeaders(),
-          body: formData,
-        })
+        const response = await uploadPhoto(file)
 
         if (response.status === 401 || response.status === 403) {
           logout()
@@ -370,6 +410,10 @@ export default function AdminPage({ onBack }: AdminPageProps) {
 
         if (!response.ok) {
           const data = await response.json()
+          if (data.code === 'missing_location') {
+            missingLocation.push({ file, previewUrl: URL.createObjectURL(file) })
+            continue
+          }
           throw new Error(data.error || 'Upload failed')
         }
 
@@ -392,6 +436,55 @@ export default function AdminPage({ onBack }: AdminPageProps) {
 
     if (failed.length > 0) {
       alert(`Uploaded ${succeeded}/${total} photos.\n\nFailed:\n${failed.join('\n')}`)
+    }
+
+    if (missingLocation.length > 0) {
+      setQueueLocation(null)
+      setLocationQueue(missingLocation)
+    }
+  }
+
+  // Drops the current photo from the location queue and moves on to the next one
+  const advanceLocationQueue = () => {
+    if (locationQueue.length > 0) {
+      URL.revokeObjectURL(locationQueue[0].previewUrl)
+    }
+    setLocationQueue(locationQueue.slice(1))
+    setQueueLocation(null)
+  }
+
+  const cancelLocationQueue = () => {
+    locationQueue.forEach(pending => URL.revokeObjectURL(pending.previewUrl))
+    setLocationQueue([])
+    setQueueLocation(null)
+  }
+
+  const uploadQueuedPhoto = async () => {
+    const pending = locationQueue[0]
+    if (!pending || !queueLocation) return
+
+    setUploadingQueued(true)
+    try {
+      const response = await uploadPhoto(pending.file, queueLocation)
+
+      if (response.status === 401 || response.status === 403) {
+        logout()
+        return
+      }
+
+      if (!response.ok) {
+        const data = await response.json()
+        throw new Error(data.error || 'Upload failed')
+      }
+
+      advanceLocationQueue()
+      fetchPhotos()
+    } catch (error) {
+      console.error(`Upload failed for ${pending.file.name}:`, error)
+      const reason = error instanceof Error ? error.message : 'Unknown error'
+      alert(`Failed to upload ${pending.file.name}: ${reason}`)
+    } finally {
+      setUploadingQueued(false)
     }
   }
 
@@ -484,17 +577,6 @@ export default function AdminPage({ onBack }: AdminPageProps) {
     } finally {
       setSaving(false)
     }
-  }
-
-  function LocationPicker() {
-    useMapEvents({
-      click(e) {
-        setEditLocation({ lat: e.latlng.lat, lng: e.latlng.lng })
-      },
-    })
-    return editLocation ? (
-      <Marker position={[editLocation.lat, editLocation.lng]} icon={markerIcon} />
-    ) : null
   }
 
   // Show login screen if auth is required and not authenticated
@@ -604,7 +686,7 @@ export default function AdminPage({ onBack }: AdminPageProps) {
                 </span>
               </label>
               <p className="text-gray-500 text-xs md:text-sm mt-2">
-                Select JPG, PNG, or WebP files with GPS data
+                Select JPG, PNG, or WebP files. Photos without GPS data can be placed on the map after selecting.
               </p>
             </div>
 
@@ -855,6 +937,85 @@ export default function AdminPage({ onBack }: AdminPageProps) {
         </div>
       )}
 
+      {/* Place Location Modal (photos uploaded without GPS data) */}
+      {locationQueue.length > 0 && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-2 md:p-4">
+          <div className="bg-gray-900 rounded-lg w-full max-w-6xl h-[95vh] md:h-[90vh] flex flex-col">
+            <div className="p-3 md:p-4 border-b border-gray-700 flex justify-between items-center">
+              <h2 className="text-lg md:text-xl font-bold text-white">
+                Set Location
+                {locationQueue.length > 1 && (
+                  <span className="text-gray-400 font-normal text-sm md:text-base ml-2">
+                    ({locationQueue.length} remaining)
+                  </span>
+                )}
+              </h2>
+              <button
+                onClick={cancelLocationQueue}
+                disabled={uploadingQueued}
+                className="text-gray-400 hover:text-white text-2xl leading-none disabled:opacity-50"
+              >
+                &times;
+              </button>
+            </div>
+
+            <div className="flex-1 flex flex-col md:flex-row gap-3 md:gap-4 p-3 md:p-4 overflow-hidden min-h-0">
+              <div className="md:w-1/3 flex-shrink-0">
+                <img
+                  src={locationQueue[0].previewUrl}
+                  alt="Photo needing a location"
+                  className="w-full max-h-32 md:max-h-[50vh] object-contain rounded-lg bg-black"
+                />
+                <div className="mt-2 md:mt-4 text-xs md:text-sm text-gray-300">
+                  <p className="text-white break-all">{locationQueue[0].file.name}</p>
+                  <p className="text-gray-400 mt-1">
+                    This photo has no GPS data. Click the map where it was taken.
+                  </p>
+                  {queueLocation && (
+                    <p className="text-green-400 mt-2">
+                      Location: {queueLocation.lat.toFixed(4)}, {queueLocation.lng.toFixed(4)}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex-1 min-h-[200px] md:min-h-[400px] rounded-lg overflow-hidden">
+                <MapContainer
+                  center={RPI_CENTER}
+                  zoom={16}
+                  className="h-full w-full"
+                >
+                  <TileLayer
+                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                  />
+                  <LocationPicker location={queueLocation} onPick={setQueueLocation} />
+                </MapContainer>
+              </div>
+            </div>
+
+            <div className="p-3 md:p-4 border-t border-gray-700 flex justify-end gap-2 md:gap-4">
+              <button
+                onClick={advanceLocationQueue}
+                disabled={uploadingQueued}
+                className="px-4 py-2 md:px-6 text-sm md:text-base text-gray-400 border border-gray-600 rounded-lg
+                           hover:bg-gray-800 transition-colors disabled:opacity-50"
+              >
+                Skip
+              </button>
+              <button
+                onClick={uploadQueuedPhoto}
+                disabled={uploadingQueued || !queueLocation}
+                className="px-4 py-2 md:px-6 text-sm md:text-base bg-green-600 text-white rounded-lg
+                           hover:bg-green-500 transition-colors disabled:opacity-50"
+              >
+                {uploadingQueued ? 'Uploading...' : 'Upload'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Edit Location Modal */}
       {editingPhoto && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-2 md:p-4">
@@ -901,7 +1062,7 @@ export default function AdminPage({ onBack }: AdminPageProps) {
                     attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
                     url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                   />
-                  <LocationPicker />
+                  <LocationPicker location={editLocation} onPick={setEditLocation} />
                   {photoGuesses.map(guess => (
                     <Marker
                       key={guess.id}
